@@ -1,3 +1,6 @@
+- 0.2.4.1
+    Added roundRobin
+
 - 0.2.4.0
     Build on GHC 9.6.
 

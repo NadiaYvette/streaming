@@ -39,6 +39,7 @@ module Streaming
    concats,
    intercalates,
    cutoff,
+   roundRobin,
    -- period,
    -- periods,
 
