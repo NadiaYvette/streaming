@@ -1,9 +1,13 @@
+{-# LANGUAGE BlockArguments      #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Main where
 
 import qualified Data.Foldable as Foldable
 import Data.Functor.Identity
 import Data.Ord
 import qualified Streaming.Prelude as S
+import qualified Streaming.Internal as S
 import Test.Hspec
 import Test.QuickCheck
 
@@ -81,6 +85,9 @@ main =
         property $ \xs k ->
           (length xs >= k) ==>
           (toL (S.slidingWindowMaxOn (const (undefined :: UnitWithLazyEq)) k (S.each (xs :: [Int]))) === drop (k - 1) xs)
+    describe "roundRobin" do
+      it "switches between a finite number of potentially infinite streams using a round robin protocol" $ do
+        property \(n :: Int) -> (n >= 5) ==> (toL . S.take (10*n) . S.roundRobin $ map S.each [[k, n+k..] | k :: Int <- [1..n]]) `shouldBe` [1..10*n]
 
 data UnitWithLazyEq = UnitWithLazyEq
 

@@ -29,6 +29,7 @@ module Streaming.Internal (
     -- * Eliminating a stream
     , intercalates
     , concats
+    , roundRobin
     , iterT
     , iterTM
     , destroy
@@ -96,9 +97,12 @@ import Data.Data (Typeable)
 import Data.Function ( on )
 import Data.Functor.Classes
 import Data.Functor.Compose
+import Data.Functor.Of
 import Data.Functor.Sum
 import Data.Monoid (Monoid (..))
 import Data.Semigroup (Semigroup (..))
+import Data.Sequence as Sequence (Seq (..), ViewL (..), singleton, viewl, (<|), (|>))
+import Data.Traversable as Traversable (foldMapDefault)
 
 -- $setup
 -- >>> import Streaming.Prelude as S
@@ -676,6 +680,15 @@ concats  = loop where
     Effect m -> lift m >>= loop
     Step fs  -> fs >>= loop
 {-# INLINE concats #-}
+
+-- | Interleave the container of streams in a round robin fashion.
+roundRobin :: (Monad m, Traversable f, Monoid r) => f (Stream (Of a) m r) -> Stream (Of a) m r
+roundRobin = effect . roundRobin' . Traversable.foldMapDefault Sequence.singleton where
+  roundRobin' q = case Sequence.viewl q of
+    EmptyL              -> pure mempty
+    Return _ :< t       -> roundRobin' t
+    Effect e :< t       -> roundRobin' . (<| t) =<< e
+    Step (x :> h') :< t -> (Step (x :> Return ()) >>) <$> roundRobin' (t |> h')
 
 {-| Split a succession of layers after some number, returning a streaming or
     effectful pair.
