@@ -90,15 +90,22 @@ import Control.Monad
 import Control.Monad.Error.Class
 import Control.Monad.Fail as Fail
 import Control.Monad.Morph
+import Control.Monad.Random.Lazy (MonadRandom (..))
+import qualified Control.Monad.Random.Lazy as Random (getRandom)
 import Control.Monad.Reader.Class
 import Control.Monad.State.Class
 import Control.Monad.Trans
+import Data.Bifunctor (second)
 import Data.Data (Typeable)
 import Data.Function ( on )
 import Data.Functor.Classes
 import Data.Functor.Compose
 import Data.Functor.Of
 import Data.Functor.Sum
+import Data.IntervalMap.Interval as IM (Interval (..), upperBound)
+import Data.IntervalMap.Lazy (IntervalMap)
+import qualified Data.IntervalMap.Lazy as IM (adjust, containing,
+                                              delete, insert, null, toList)
 import Data.Monoid (Monoid (..))
 import Data.Semigroup (Semigroup (..))
 import Data.Sequence as Sequence (Seq (..), ViewL (..), singleton, viewl, (<|), (|>))
@@ -689,6 +696,40 @@ roundRobin = effect . roundRobin' . Traversable.foldMapDefault Sequence.singleto
     Return _ :< t       -> roundRobin' t
     Effect e :< t       -> roundRobin' . (<| t) =<< e
     Step (x :> h') :< t -> (Step (x :> Return ()) >>) <$> roundRobin' (t |> h')
+
+-- | Randomly choose from a number of streams.
+randomChoice :: forall m t . MonadRandom m => [(Stream (Of t) m (), Double)] -> Stream (Of t) m ()
+randomChoice [] = pure mempty
+randomChoice [(g, _)] = g
+randomChoice ss@(_:_:_) = effect $ randHelper tree where
+  randHelper :: IntervalMap Double (Stream (Of t) m ()) -> m (Stream (Of t) m ())
+  randHelper t = do
+    r <- Random.getRandom
+    case IM.toList $ t `IM.containing` r of
+      -- This should happen only when IM.null t
+      [] -> pure mempty
+      (i, g) : _ -> randInnerHelper g where
+        randInnerHelper :: Stream (Of t) m () -> m (Stream (Of t) m ())
+        randInnerHelper (Return _)         = randHelper $ IM.delete i t
+        randInnerHelper (Effect e)         = randInnerHelper =<< e
+        randInnerHelper (Step (a :> rest)) =
+          (Step (a :> Return ()) >>) <$>
+                  randHelper (IM.adjust (const rest) i t)
+  (_gs, ps) = unzip ss
+  ss' = map (second (/ sum ps)) ss
+  tree :: IntervalMap Double (Stream (Of t) m ())
+  tree = buildTree $ buildList ss'
+  buildTree :: [(t', Interval Double)] -> IntervalMap Double t'
+  buildTree = foldr (uncurry $ flip IM.insert) mempty
+  buildList :: [(t', Double)] -> [(t', Interval Double)]
+  buildList []            = []
+  buildList ((o, x) : xs) = scanl scanStep (o, IntervalOC 0 x) xs
+  scanStep :: (t', Interval Double) -> (t', Double) -> (t', Interval Double)
+  scanStep (_o, i) (o', x) = (o', ClosedInterval a b)
+    where
+      a = IM.upperBound i
+      b = a + x
+
 
 {-| Split a succession of layers after some number, returning a streaming or
     effectful pair.
