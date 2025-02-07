@@ -49,9 +49,11 @@
 -}
 {-# LANGUAGE BangPatterns        #-}
 {-# LANGUAGE CPP                 #-}
+{-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies        #-}
+{-# LANGUAGE ViewPatterns        #-}
 
 module Streaming.Prelude (
     -- * Types
@@ -72,6 +74,7 @@ module Streaming.Prelude (
     , replicate
     , untilLeft
     , untilRight
+    , roundRobin
     , cycle
     , replicateM
     , enumFrom
@@ -277,6 +280,7 @@ import Text.Read (readMaybe)
 import qualified Data.Foldable as Foldable
 import qualified Data.IntSet as IntSet
 import qualified Data.Sequence as Seq
+import           Data.Sequence (Seq, ViewL (..), (|>))
 import qualified Data.Set as Set
 import Data.Word (Word64)
 import qualified GHC.IO.Exception as G
@@ -2174,6 +2178,20 @@ untilRight act = Effect loop where
       Right r -> return (Return r)
       Left a -> return (Step (a :> Effect loop))
 {-# INLINABLE untilRight #-}
+
+-- | Interleave the container of streams in a round robin fashion.
+roundRobin :: forall m f r a . (Monad m, Foldable f, Monoid r)
+  => f (Stream (Of a) m r) -> Stream (Of a) m r
+roundRobin (Seq.fromList . Foldable.toList -> streams)
+  = unfoldr roundRobin' streams where
+      roundRobin' :: Seq (Stream (Of a) m r)
+                  -> m (Either r (a, Seq (Stream (Of a) m r)))
+      roundRobin' (Seq.viewl -> q)
+        | EmptyL <- q = pure $ Left mempty
+        | h :< t <- q
+        = uncons h >>= \case
+            Nothing -> roundRobin' t
+            Just (x, h') -> pure $ Right (x, t |> h')
 
 -- ---------------------------------------
 -- with
